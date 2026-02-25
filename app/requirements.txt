@@ -1,0 +1,4 @@
+fastapi[standard]==0.129.0
+celery==5.6.2
+minio==7.2.20
+boto3==1.42.55
