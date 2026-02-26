@@ -1,24 +1,4 @@
 services:
-  rabbitmq:
-    image: rabbitmq:4.2.4-management
-    hostname: rabbitmq-node
-    container_name: rabbitmq
-    restart: always
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=arqcabe
-      - RABBITMQ_DEFAULT_PASS=rabbitmq_password
-      - RABBITMQ_DEFAULT_VHOST=arqcabe_vhost
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   minio:
     # https://github.com/minio/minio/blob/master/docs/orchestration/docker-compose/docker-compose.yaml
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -36,6 +16,26 @@ services:
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.2.4-management
+    hostname: rabbitmq-node
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=arqcabe
+      - RABBITMQ_DEFAULT_PASS=rabbitmq_password
+      - RABBITMQ_DEFAULT_VHOST=arqcabe_vhost
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
       timeout: 5s
       retries: 5
 

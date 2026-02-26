@@ -24,10 +24,11 @@ async def process_document(file: UploadFile = File(...)):
     try:
         create_bucket_if_not_exists(s3_client, BUCKET_NAME)
 
-        file_obj = io.BytesIO(content)
-        s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
+        # file_obj = io.BytesIO(content)
+        # s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
 
         task = save_in_object_storage.delay(file.filename)
+        print("1. Sent to queue")
         enqueued_file = EnqueuedFile(
             id=task.id,
             filename=file.filename,
