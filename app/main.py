@@ -3,7 +3,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from celery_app import save_in_object_storage
 from s3_client import get_s3_client, create_bucket_if_not_exists
-import io
 import mimetypes
 
 app = FastAPI()
