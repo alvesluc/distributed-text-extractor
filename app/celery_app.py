@@ -1,37 +1,84 @@
+# from celery import Celery
+# import pytesseract
+# from PIL import Image
+# import os
+# import json
+
+# celery_app = Celery(
+#     'worker',
+#     broker='amqp://arqcabe:rabbitmq_password@localhost:5672/arqcabe_vhost'
+# )
+
+# @celery_app.task(name="apply_ocr")
+# def apply_ocr(filename: str):
+#     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+#     image_path = os.path.join(BASE_DIR, "images", "sl-bem-298-66510c4b323cf-66510c4b34d37_page-0001.jpg")
+    
+#     if not os.path.exists(image_path):
+#         print(f"Error: File not found at {image_path}")
+#         return
+
+#     try:
+#         img = Image.open(image_path)
+#         data = pytesseract.image_to_data(img, lang='por', output_type=pytesseract.Output.DICT)
+
+#         print("OCR Results:")
+#         print(data['text'])
+
+#     except Exception as e:
+#         print(f"Error during OCR processing: {e}")
+#         return
+
+#     print("2. Processed")
+#     return
+
+
 from celery import Celery
-from paddleocr import PaddleOCR
+from app.s3_client import get_s3_client
+from pdf2image import convert_from_bytes
+import pytesseract
 import os
 
+BUCKET_NAME = "documents"
+OUTPUT_DIR = "ocr_output"
+
 celery_app = Celery(
-    'worker',
-    broker='amqp://arqcabe:rabbitmq_password@localhost:5672/arqcabe_vhost'
+    "worker",
+    broker="amqp://arqcabe:rabbitmq_password@localhost:5672/arqcabe_vhost"
 )
 
-ocr = PaddleOCR(
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=False,
-    enable_mkldnn=False
-)
 
-@celery_app.task(name="save_in_object_storage")
-def save_in_object_storage(filename: str):
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    image_path = os.path.join(BASE_DIR, "images", "sl-bem-298-66510c4b323cf-66510c4b34d37_page-0001.jpg")
-    
-    if not os.path.exists(image_path):
-        print(f"Error: File not found at {image_path}")
-        return
+@celery_app.task(name="apply_ocr")
+def apply_ocr(filename: str):
+    s3_client = get_s3_client()
 
-    result = ocr.predict(image_path)
-    
-    print("1. OCR Started")
+    try:
+        s3_object = s3_client.get_object(Bucket=BUCKET_NAME, Key=filename)
+        pdf_bytes = s3_object["Body"].read()
 
-    for line in result:
-        for res in line:
-            text = res[1][0]
-            confidence = res[1][1]
-            print(f"Detected Text: {text} | Confidence: {confidence}")
+        pages = convert_from_bytes(pdf_bytes)
 
-    print("2. Processed")
-    return
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        base_name = os.path.splitext(filename)[0]
+
+        for index, page in enumerate(pages, start=1):
+            text = pytesseract.image_to_string(page, lang="por")
+
+            output_file_path = os.path.join(
+                OUTPUT_DIR,
+                f"{base_name}_page_{index}.txt"
+            )
+
+            with open(output_file_path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+        return {
+            "status": "completed",
+            "pages_processed": len(pages)
+        }
+
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e)
+        }

@@ -1,9 +1,10 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from celery_app import save_in_object_storage
-from s3_client import get_s3_client, create_bucket_if_not_exists
+from app.celery_app import apply_ocr
+from app.s3_client import get_s3_client, create_bucket_if_not_exists
 import mimetypes
+import io
 
 app = FastAPI()
 BUCKET_NAME = "documents"
@@ -26,8 +27,8 @@ async def process_document(file: UploadFile = File(...)):
         # file_obj = io.BytesIO(content)
         # s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
 
-        task = save_in_object_storage.delay(file.filename)
-        print("1. Sent to queue")
+        task = apply_ocr.delay(file.filename)
+
         enqueued_file = EnqueuedFile(
             id=task.id,
             filename=file.filename,
