@@ -18,3 +18,8 @@ sudo apt install tesseract-ocr tesseract-ocr-por
 ```
 pip install pytesseract pillow
 ```
+
+## Run Elasticsearch
+```sh
+curl -fsSL https://elastic.co/start-local | sh
+```
