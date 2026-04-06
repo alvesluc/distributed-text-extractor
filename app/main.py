@@ -1,6 +1,8 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from elasticsearch import Elasticsearch
+from typing import List, Optional
 from app.celery_app import apply_ocr
 from app.s3_client import get_s3_client, create_bucket_if_not_exists
 import mimetypes
@@ -9,12 +11,86 @@ import io
 app = FastAPI()
 BUCKET_NAME = "documents"
 
+es = Elasticsearch(
+    ["http://localhost:9200"],
+    basic_auth=("elastic", "ITon0zhh"),
+    verify_certs=False
+)
+INDEX_NAME = "documents"
+
 
 class EnqueuedFile(BaseModel):
     id: str
     filename: str
     status: str
 
+class MockDocument(BaseModel):
+    filename: str
+    text: str
+
+@app.post("/mock-index")
+async def seed_data(docs: List[MockDocument]):
+    """
+    Endpoint to manually push text into Elasticsearch for testing.
+    """
+    results = []
+    for doc in docs:
+        try:
+            resp = es.index(index=INDEX_NAME, id=doc.filename, document=doc.model_dump())
+            results.append({"filename": doc.filename, "result": resp['result']})
+        except Exception as e:
+            results.append({"filename": doc.filename, "error": str(e)})
+            
+    return {"status": "batch_processed", "details": results}
+
+@app.get("/search")
+async def search_documents(q: Optional[str] = None):
+    """
+    Search for text within the indexed documents.
+    """
+    if not q:
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+
+    try:
+        query = {
+            "query": {
+                "bool": {
+                    "should": [
+                        {"match": {"text": {"query": q, "boost": 5.0}}},
+                        {"match": {"text.prefix": {"query": q, "boost": 2.0}}},
+                        {"wildcard": {"text.raw": {"value": f"*{q}*", "boost": 1.0}}}
+                    ]
+                }
+            },
+            "highlight": {
+                "require_field_match": False,
+                "fields": {
+                    "text": {
+                        "pre_tags": ["<em>"],
+                        "post_tags": ["</em>"],
+                        "fragment_size": 150,
+                        "number_of_fragments": 3
+                    }
+                }
+            }
+        }
+        
+        response = es.search(index=INDEX_NAME, body=query)
+        
+        hits = []
+        for hit in response['hits']['hits']:
+            hits.append({
+                "filename": hit["_source"]["filename"],
+                "score": hit["_score"],
+                "snippets": hit.get("highlight", {}).get("text", [])
+            })
+
+        return {
+            "total_results": response['hits']['total']['value'],
+            "results": hits
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process-document", status_code=202, response_model=EnqueuedFile)
 async def process_document(file: UploadFile = File(...)):
@@ -24,8 +100,8 @@ async def process_document(file: UploadFile = File(...)):
     try:
         create_bucket_if_not_exists(s3_client, BUCKET_NAME)
 
-        # file_obj = io.BytesIO(content)
-        # s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
+        file_obj = io.BytesIO(content)
+        s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
 
         task = apply_ocr.delay(file.filename)
 
