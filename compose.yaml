@@ -1,134 +1,151 @@
-services:
-  minio:
-    # https://github.com/minio/minio/blob/master/docs/orchestration/docker-compose/docker-compose.yaml
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data --console-address ":9001"
-    container_name: minio
-    restart: always
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=arqcabe_os
-      - MINIO_ROOT_PASSWORD=arqcabe_os
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  services:
+    api:
+      build: .
+      container_name: fastapi_app
+      restart: always
+      ports:
+        - "8000:80"
+      environment:
+        - MINIO_ENDPOINT=minio:9000
+        - RABBITMQ_HOST=rabbitmq
+        - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      depends_on:
+        minio:
+          condition: service_healthy
+        rabbitmq:
+          condition: service_healthy
+        elasticsearch:
+          condition: service_healthy
+    minio:
+      # https://github.com/minio/minio/blob/master/docs/orchestration/docker-compose/docker-compose.yaml
+      image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+      command: server /data --console-address ":9001"
+      container_name: minio
+      restart: always
+      ports:
+        - "9000:9000"
+        - "9001:9001"
+      environment:
+        - MINIO_ROOT_USER=arqcabe_os
+        - MINIO_ROOT_PASSWORD=arqcabe_os
+      volumes:
+        - minio_data:/data
+      healthcheck:
+        test: ["CMD", "mc", "ready", "local"]
+        interval: 5s
+        timeout: 5s
+        retries: 5
 
-  rabbitmq:
-    image: rabbitmq:4.2.4-management
-    hostname: rabbitmq-node
-    container_name: rabbitmq
-    restart: always
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      - RABBITMQ_DEFAULT_USER=arqcabe
-      - RABBITMQ_DEFAULT_PASS=rabbitmq_password
-      - RABBITMQ_DEFAULT_VHOST=arqcabe_vhost
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-  
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_LOCAL_VERSION}
-    container_name: ${ES_LOCAL_CONTAINER_NAME}
-    volumes:
-      - dev-elasticsearch:/usr/share/elasticsearch/data
-    ports:
-      - 127.0.0.1:${ES_LOCAL_PORT}:9200
-    extra_hosts:
-      - host.docker.internal:host-gateway
-      - model-runner.docker.internal:host-gateway
-    environment:
-      - discovery.type=single-node
-      - ELASTIC_PASSWORD=${ES_LOCAL_PASSWORD}
-      - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false
-      - xpack.license.self_generated.type=trial
-      - xpack.ml.use_auto_machine_memory_percent=true
-      - ES_JAVA_OPTS=${ES_LOCAL_JAVA_OPTS}
-      - cluster.routing.allocation.disk.watermark.low=${ES_LOCAL_DISK_SPACE_REQUIRED}
-      - cluster.routing.allocation.disk.watermark.high=${ES_LOCAL_DISK_SPACE_REQUIRED}
-      - cluster.routing.allocation.disk.watermark.flood_stage=${ES_LOCAL_DISK_SPACE_REQUIRED}
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl --output /dev/null --silent --head --fail -u elastic:${ES_LOCAL_PASSWORD} http://elasticsearch:9200",
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 30
+    rabbitmq:
+      image: rabbitmq:4.2.4-management
+      hostname: rabbitmq-node
+      container_name: rabbitmq
+      restart: always
+      ports:
+        - "5672:5672"
+        - "15672:15672"
+      environment:
+        - RABBITMQ_DEFAULT_USER=arqcabe
+        - RABBITMQ_DEFAULT_PASS=rabbitmq_password
+        - RABBITMQ_DEFAULT_VHOST=arqcabe_vhost
+      volumes:
+        - rabbitmq_data:/var/lib/rabbitmq
+      healthcheck:
+        test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+    
+    elasticsearch:
+      image: docker.elastic.co/elasticsearch/elasticsearch:${ES_LOCAL_VERSION}
+      container_name: ${ES_LOCAL_CONTAINER_NAME}
+      volumes:
+        - dev-elasticsearch:/usr/share/elasticsearch/data
+      ports:
+        - 127.0.0.1:${ES_LOCAL_PORT}:9200
+      extra_hosts:
+        - host.docker.internal:host-gateway
+        - model-runner.docker.internal:host-gateway
+      environment:
+        - discovery.type=single-node
+        - ELASTIC_PASSWORD=${ES_LOCAL_PASSWORD}
+        - xpack.security.enabled=true
+        - xpack.security.http.ssl.enabled=false
+        - xpack.license.self_generated.type=trial
+        - xpack.ml.use_auto_machine_memory_percent=true
+        - ES_JAVA_OPTS=${ES_LOCAL_JAVA_OPTS}
+        - cluster.routing.allocation.disk.watermark.low=${ES_LOCAL_DISK_SPACE_REQUIRED}
+        - cluster.routing.allocation.disk.watermark.high=${ES_LOCAL_DISK_SPACE_REQUIRED}
+        - cluster.routing.allocation.disk.watermark.flood_stage=${ES_LOCAL_DISK_SPACE_REQUIRED}
+      ulimits:
+        memlock:
+          soft: -1
+          hard: -1
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "curl --output /dev/null --silent --head --fail -u elastic:${ES_LOCAL_PASSWORD} http://elasticsearch:9200",
+          ]
+        interval: 10s
+        timeout: 10s
+        retries: 30
 
-  kibana_settings:
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    image: docker.elastic.co/elasticsearch/elasticsearch:${ES_LOCAL_VERSION}
-    container_name: ${KIBANA_LOCAL_SETTINGS_CONTAINER_NAME}
-    restart: 'no'
-    command: >
-      bash -c '
-        echo "Setup the kibana_system password";
-        start_time=$$(date +%s);
-        timeout=60;
-        until curl -s -u "elastic:${ES_LOCAL_PASSWORD}" -X POST http://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_LOCAL_PASSWORD}\"}" -H "Content-Type: application/json" | grep -q "^{}"; do
-          if [ $$(($$(date +%s) - $$start_time)) -ge $$timeout ]; then
-            echo "Error: Elasticsearch timeout";
-            exit 1;
-          fi;
-          sleep 2;
-        done;
-      '
+    kibana_settings:
+      depends_on:
+        elasticsearch:
+          condition: service_healthy
+      image: docker.elastic.co/elasticsearch/elasticsearch:${ES_LOCAL_VERSION}
+      container_name: ${KIBANA_LOCAL_SETTINGS_CONTAINER_NAME}
+      restart: 'no'
+      command: >
+        bash -c '
+          echo "Setup the kibana_system password";
+          start_time=$$(date +%s);
+          timeout=60;
+          until curl -s -u "elastic:${ES_LOCAL_PASSWORD}" -X POST http://elasticsearch:9200/_security/user/kibana_system/_password -d "{\"password\":\"${KIBANA_LOCAL_PASSWORD}\"}" -H "Content-Type: application/json" | grep -q "^{}"; do
+            if [ $$(($$(date +%s) - $$start_time)) -ge $$timeout ]; then
+              echo "Error: Elasticsearch timeout";
+              exit 1;
+            fi;
+            sleep 2;
+          done;
+        '
 
-  kibana:
-    depends_on:
-      kibana_settings:
-        condition: service_completed_successfully
-    image: docker.elastic.co/kibana/kibana:${ES_LOCAL_VERSION}
-    container_name: ${KIBANA_LOCAL_CONTAINER_NAME}
-    volumes:
-      - dev-kibana:/usr/share/kibana/data
-      - ./config/telemetry.yml:/usr/share/kibana/config/telemetry.yml
-    ports:
-      - 127.0.0.1:${KIBANA_LOCAL_PORT}:5601
-    extra_hosts:
-      - host.docker.internal:host-gateway
-      - model-runner.docker.internal:host-gateway
-    environment:
-      - SERVER_NAME=kibana
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=${KIBANA_LOCAL_PASSWORD}
-      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
-      - ELASTICSEARCH_PUBLICBASEURL=http://localhost:${ES_LOCAL_PORT}
-      - XPACK_SPACES_DEFAULTSOLUTION=es
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -s -I http://kibana:5601 | grep -q 'HTTP/1.1 302 Found'",
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 30
+    kibana:
+      depends_on:
+        kibana_settings:
+          condition: service_completed_successfully
+      image: docker.elastic.co/kibana/kibana:${ES_LOCAL_VERSION}
+      container_name: ${KIBANA_LOCAL_CONTAINER_NAME}
+      volumes:
+        - dev-kibana:/usr/share/kibana/data
+        - ./config/telemetry.yml:/usr/share/kibana/config/telemetry.yml
+      ports:
+        - 127.0.0.1:${KIBANA_LOCAL_PORT}:5601
+      extra_hosts:
+        - host.docker.internal:host-gateway
+        - model-runner.docker.internal:host-gateway
+      environment:
+        - SERVER_NAME=kibana
+        - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+        - ELASTICSEARCH_USERNAME=kibana_system
+        - ELASTICSEARCH_PASSWORD=${KIBANA_LOCAL_PASSWORD}
+        - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY}
+        - ELASTICSEARCH_PUBLICBASEURL=http://localhost:${ES_LOCAL_PORT}
+        - XPACK_SPACES_DEFAULTSOLUTION=es
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "curl -s -I http://kibana:5601 | grep -q 'HTTP/1.1 302 Found'",
+          ]
+        interval: 10s
+        timeout: 10s
+        retries: 30
 
-volumes:
-  rabbitmq_data:
-  minio_data:
-  dev-elasticsearch:
-  dev-kibana:
+  volumes:
+    rabbitmq_data:
+    minio_data:
+    dev-elasticsearch:
+    dev-kibana:

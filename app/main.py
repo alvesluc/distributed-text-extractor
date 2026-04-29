@@ -7,12 +7,17 @@ from app.celery_app import apply_ocr
 from app.s3_client import get_s3_client, create_bucket_if_not_exists
 import mimetypes
 import io
+from pathlib import Path
+from pdf2image import convert_from_path
+import pytesseract
 
 app = FastAPI()
-BUCKET_NAME = "documents"
+
+UPLOAD_DIR = Path("uploaded documents")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 es = Elasticsearch(
-    ["http://localhost:9200"],
+    ["http://elasticsearch:9200"],
     basic_auth=("elastic", "ITon0zhh"),
     verify_certs=False
 )
@@ -94,30 +99,96 @@ async def search_documents(q: Optional[str] = None):
 
 @app.post("/process-document", status_code=202, response_model=EnqueuedFile)
 async def process_document(file: UploadFile = File(...)):
-    content = await file.read()
-    s3_client = get_s3_client()
+    file_path = UPLOAD_DIR / file.filename
 
     try:
-        create_bucket_if_not_exists(s3_client, BUCKET_NAME)
+        content = await file.read()
 
-        file_obj = io.BytesIO(content)
-        s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
+        with open(file_path, "wb") as f:
+            f.write(content)
 
-        task = apply_ocr.delay(file.filename)
-
-        enqueued_file = EnqueuedFile(
+        task = apply_ocr.delay(file_path)
+        
+        return EnqueuedFile(
             id=task.id,
             filename=file.filename,
             status="Processing document..."
         )
-
-        return enqueued_file
+    
     except Exception as exc:
+        print(f"Error saving file: {exc}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to save document: {str(exc)}"
+        )
+    
+@app.post("/process-document-now")
+async def process_document_now(file: UploadFile):
+    filename = file.filename
+    file_path = UPLOAD_DIR / filename
+
+    try:
+        content = await file.read()
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        document_pages_as_images = convert_from_path(file_path)
+        if not document_pages_as_images:
+            raise ValueError("No pages were extracted from the PDF.")
+
+        full_text = []
+
+        for page in document_pages_as_images:
+            page_text = pytesseract.image_to_string(page, lang="por")
+            full_text.append(page_text)
+
+        combined_text = "\n".join(full_text)
+
+        es.index(
+            index=INDEX_NAME,
+            id=file.filename,
+            document={
+                "filename": filename,
+                "text": combined_text
+            }
+        )
+
         return {
-            "status": "Failed to save document",
-            "error": exc
+            "filename": filename,
+            "pages_processed": len(document_pages_as_images)
         }
 
+    except Exception as exc:
+        print(f"Error saving file: {exc}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to save document: {str(exc)}"
+        )
+    
+    # content = await file.read()
+    # s3_client = get_s3_client()
+
+    # try:
+    #     create_bucket_if_not_exists(s3_client, BUCKET_NAME)
+
+    #     file_obj = io.BytesIO(content)
+    #     s3_client.upload_fileobj(file_obj, BUCKET_NAME, file.filename)
+
+    #     task = apply_ocr.delay(file.filename)
+
+    #     enqueued_file = EnqueuedFile(
+    #         id=task.id,
+    #         filename=file.filename,
+    #         status="Processing document..."
+    #     )
+
+    #     return enqueued_file
+    # except Exception as exc:
+    #     return {
+    #         "status": "Failed to save document",
+    #         "error": exc
+    #     }
 
 @app.get("/documents")
 async def list_documents():

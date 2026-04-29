@@ -3,7 +3,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 S3_CONFIG = {
-    "endpoint_url": "http://localhost:9000",
+    "endpoint_url": "http://minio:9000",
     "aws_access_key_id": "arqcabe_os",
     "aws_secret_access_key": "arqcabe_os",
     "region_name": "us-east-1"
